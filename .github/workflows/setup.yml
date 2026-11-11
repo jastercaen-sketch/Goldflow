@@ -28,7 +28,7 @@ jobs:
           node-version: 22
       - name: List houses
         if: ${{ inputs.house_id == '' }}
-        run: node collector/discover.mjs
+        run: node collector/discover.mjs --all
       - name: Save house
         if: ${{ inputs.house_id != '' }}
         run: node collector/discover.mjs --save "${{ inputs.house_id }}" "EU PvP Alliance"
