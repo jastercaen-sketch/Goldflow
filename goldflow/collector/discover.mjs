@@ -18,7 +18,8 @@ if (saveIdx >= 0) {
 
 // Common items to compare against what you see in-game (classic item ids)
 const BENCH = { 2589: 'Linen Cloth', 2592: 'Wool Cloth', 4306: 'Silk Cloth', 4338: 'Mageweave Cloth', 14047: 'Runecloth',
-  2770: 'Copper Ore', 2840: 'Copper Bar', 2772: 'Iron Ore', 2447: 'Peacebloom', 765: 'Silverleaf', 2318: 'Light Leather' };
+  2770: 'Copper Ore', 2840: 'Copper Bar', 2772: 'Iron Ore', 2447: 'Peacebloom', 765: 'Silverleaf', 2318: 'Light Leather',
+  3173: 'Boar Intestines', 723: 'Goretusk Liver' };
 
 const { json: rs } = await blizzardJson('/data/wow/ruleset/index', NS_DYNAMIC);
 log('Rulesets:', (rs.rulesets || rs.results || []).map((r) => `${r.id}=${r.name?.en_GB || r.name || ''}`).join(', ') || JSON.stringify(rs).slice(0, 200));
@@ -35,6 +36,7 @@ for (const h of scan) {
     const house = await fetchHouse(h.id);
     const floor = {};
     for (const r of house.rows) if (BENCH[r.item_id] && (!floor[r.item_id] || r.unit_price < floor[r.item_id])) floor[r.item_id] = r.unit_price;
+    if (!house.rows.length) console.log(`(house ${h.id} returned no listings — raw count ${house.raw})`);
     console.log(`House ${h.id} — ${house.rows.length} listings, ${new Set(house.rows.map((r) => r.item_id)).size} items, updated ${house.lastModified}`);
     for (const [id, n] of Object.entries(BENCH)) if (floor[id]) console.log(`   ${n.padEnd(16)} ${fmtMoney(floor[id])}`);
     console.log('');
