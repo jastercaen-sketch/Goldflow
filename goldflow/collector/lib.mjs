@@ -8,6 +8,10 @@ for (const k of ['BLIZZARD_CLIENT_ID', 'BLIZZARD_CLIENT_SECRET', 'SUPABASE_URL',
     : k === 'SUPABASE_URL' ? parts.find((p) => /^https?:\/\//.test(p)) : null;
   env[k] = pick || parts[0] || '';
 }
+{
+  const k = env.SUPABASE_SERVICE_ROLE_KEY || '';
+  if (k) console.log(`Supabase key check: ${k.length} characters, starts with ${k.startsWith('sb_secret_') ? 'sb_secret_' : k.startsWith('eyJ') ? 'eyJ (legacy key)' : k.startsWith('sb_publishable_') ? 'sb_publishable_ (wrong key: that is the public one)' : 'something unexpected'}${/[^\x21-\x7e]/.test(k) ? ', contains hidden-dot characters (copied from the masked text)' : ''}`);
+}
 export const REGION = (env.REGION || 'eu').toLowerCase();
 export const RULESET_ID = Number(env.RULESET_ID || 1); // 1 = PvP
 export const API = `https://${REGION}.api.blizzard.com`;
