@@ -1,0 +1,34 @@
+name: Goldflow find auction house
+
+# Run from the Actions tab. Without an id it lists the Alliance auction houses with
+# sample prices to compare in-game; with an id it saves that house in Goldflow.
+on:
+  workflow_dispatch:
+    inputs:
+      house_id:
+        description: 'Leave empty to list houses, or enter the id to save'
+        required: false
+
+defaults:
+  run:
+    working-directory: goldflow   # the code lives in the goldflow/ folder of the repo
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    env:
+      BLIZZARD_CLIENT_ID: ${{ secrets.BLIZZARD_CLIENT_ID }}
+      BLIZZARD_CLIENT_SECRET: ${{ secrets.BLIZZARD_CLIENT_SECRET }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: List houses
+        if: ${{ inputs.house_id == '' }}
+        run: node collector/discover.mjs
+      - name: Save house
+        if: ${{ inputs.house_id != '' }}
+        run: node collector/discover.mjs --save "${{ inputs.house_id }}" "EU PvP Alliance"
