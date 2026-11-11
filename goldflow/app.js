@@ -119,11 +119,25 @@ function shell() {
   <main class="sheet" id="main" tabindex="-1"></main>`;
 }
 
+// How much price history there is, over the rolling 7-day window the prices are judged on.
+// red: under 1 day, yellow: 1-3 days, green: 3+ days (full at 7)
+function historyMeter(hours, { label = 'Price history', compact = false } = {}) {
+  const h = Math.max(0, Math.min(168, Number(hours) || 0));
+  const lvl = h >= 72 ? 'good' : h >= 24 ? 'ok' : 'low';
+  const amount = h < 24 ? `${h} hour${h === 1 ? '' : 's'}` : `${(h / 24).toFixed(h >= 168 ? 0 : 1)} days`;
+  const note = { low: 'too little to trust deals yet', ok: 'deals usable, still settling', good: h >= 168 ? 'full week' : 'reliable' }[lvl];
+  return `<div class="meter ${lvl} ${compact ? 'compact' : ''}" role="meter" aria-valuemin="0" aria-valuemax="168" aria-valuenow="${h}" aria-label="${esc(label)}: ${amount} of 7 days">
+    <span class="meter-label">${esc(label)}</span>
+    <span class="meter-bar"><i style="width:${(h / 168) * 100}%"></i><b style="left:${(24 / 168) * 100}%"></b><b style="left:${(72 / 168) * 100}%"></b></span>
+    <span class="meter-text"><strong>${amount}</strong> of 7 days, ${note}</span></div>`;
+}
+
 function statusLine() {
   const st = S.status;
   if (!st) return `<div class="status"><span class="live stale"></span>No auction house scan yet.</div>`;
   const stale = Date.now() - new Date(st.ts) > 3 * 36e5;
-  return `<div class="status"><span class="live ${stale ? 'stale' : ''}"></span>Last auction house scan ${ago(st.ts)} — ${num(st.auctions)} listings, ${num(st.items)} different items.${stale ? ' The scanner may have stopped; check GitHub Actions.' : ''}</div>`;
+  return `<div class="status"><span class="live ${stale ? 'stale' : ''}"></span>Last auction house scan ${ago(st.ts)} — ${num(st.auctions)} listings, ${num(st.items)} different items.${stale ? ' The scanner may have stopped; check GitHub Actions.' : ''}</div>
+  ${st.historyHours != null ? historyMeter(st.historyHours) : ''}`;
 }
 
 function setupNotices() {
@@ -534,6 +548,7 @@ async function itemModal(id) {
       <div>Floor now<br>${money(m.cur_min)}</div><div>Typical, 7 days<br>${money(m.med7_min)}</div><div>Typical, 30 days<br>${money(m.med30_min)}</div>
       <div>Listed now<br><b>${num(m.cur_qty)}</b> in ${num(m.cur_auctions)}</div><div>Sold per day<br><b>${m.sold_per_day7 == null ? '—' : num(m.sold_per_day7, 1)}</b></div>
     </div>
+    ${historyMeter(m.snapshots7, { label: 'History for this item', compact: true })}
     ${plan ? `<div class="panel" style="margin:6px 0 14px">${seal(plan.verdict)} <b>Buy ${num(plan.qty)}</b> (${plan.listings} listing${plan.listings > 1 ? 's' : ''}) up to ${money(plan.maxPrice)}, cost ${money(plan.cost)}. List at ${money(plan.sellPrice)} → net ${money(plan.profit, { sign: true, tone: true })} (${pct(plan.roi)}). Confidence ${plan.confidence}.${tags(plan.tags)}</div>` : '<p class="muted">No profitable flip in today\'s listings.</p>'}
     <h3>Last 3 days, hourly</h3><div class="legend"><span><i style="--lc:#8b5d1c"></i>Floor price</span><span><i style="--lc:#4f7d22"></i>Cheapest 10% of units</span></div>
     ${lineChart([{ name: 'Floor', color: '#8b5d1c', data: h.map((x) => x.min_price) }, { name: 'Cheapest 10%', color: '#4f7d22', data: h.map((x) => x.p10_price), width: 1.5 }], { xLabels: xl })}
