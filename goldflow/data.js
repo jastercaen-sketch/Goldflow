@@ -43,7 +43,7 @@ export async function supabaseBackend(cfg) {
     },
     async deals() {
       if (!houseId) return [];
-      return ok(await db.from('deals').select('*').eq('house_id', houseId).order('profit', { ascending: false }).limit(500));
+      return ok(await db.from('deals').select('*').eq('house_id', houseId).order('profit', { ascending: false }).limit(1000));
     },
     async market(ids) {
       const out = new Map();
@@ -287,7 +287,8 @@ export function demoBackend() {
     const s = normSettings(settings), out = [];
     for (const it of M.items) {
       const L = M.ladders.get(it.id);
-      for (const plan of [planFlip(L, M.stats.get(it.id), it, s), planVendorFlip(L, it, s)]) {
+      const loose = { ...s, min_profit: 500 }; // same as the live scanner: small deals too
+      for (const plan of [planFlip(L, M.stats.get(it.id), it, loose), planVendorFlip(L, it, loose)]) {
         if (!plan?.verdict) continue;
         plan.buys = [...L].sort((a, b) => a.unit_price - b.unit_price).slice(0, plan.listings);
         out.push({ house_id: HOUSE, item_id: it.id, kind: plan.kind, computed_at: M.ts, profit: plan.profit, roi: plan.roi, confidence: plan.confidence, verdict: plan.verdict, plan });
