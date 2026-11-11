@@ -159,6 +159,38 @@ export function planVendorFlip(ladder, item, settings) {
   };
 }
 
+// ---------- budget ----------
+// Trim a buy plan to what fits in a budget (whole listings only) and re-price it:
+// buying fewer listings means undercutting a cheaper remaining listing.
+export function fitBudget(plan, budget, settings) {
+  if (!plan || !budget || plan.cost <= budget) return plan;
+  const s = normSettings(settings);
+  const buys = plan.buys || [];
+  let qty = 0, cost = 0, k = 0;
+  while (k < buys.length && cost + buys[k].unit_price * buys[k].quantity <= budget) {
+    qty += buys[k].quantity; cost += buys[k].unit_price * buys[k].quantity; k++;
+  }
+  if (!k || k >= buys.length) return null;
+  let sellPrice, revenue;
+  if (plan.kind === 'vendor') { sellPrice = plan.sellPrice; revenue = qty * sellPrice; }
+  else {
+    sellPrice = Math.floor(Math.min(plan.ref, buys[k].unit_price) * (1 - s.undercut));
+    revenue = Math.floor(qty * sellPrice * (1 - s.ah_cut)) - qty * (plan.depositPerUnit || 0);
+  }
+  const profit = revenue - cost;
+  if (profit <= 0) return null;
+  return {
+    ...plan, listings: k, qty, cost, maxPrice: buys[k - 1].unit_price, avgPrice: Math.round(cost / qty),
+    sellPrice, revenue, profit, roi: profit / cost, floorAfter: plan.kind === 'vendor' ? plan.floorAfter : buys[k].unit_price,
+    daysToSell: plan.soldPerDay ? qty / plan.soldPerDay : null, buys: buys.slice(0, k), trimmed: true,
+  };
+}
+// With a small purse, a deal is worth showing if it earns at least min_roi of the budget (never less than 5s).
+export function budgetMinProfit(budget, settings) {
+  const s = normSettings(settings);
+  return budget ? Math.min(s.min_profit, Math.max(500, Math.round(budget * s.min_roi))) : s.min_profit;
+}
+
 // ---------- crafting ----------
 // priceOf(itemId) -> item_market row (or undefined)
 export function craftQuote(recipe, priceOf, settings, { crafts = 1 } = {}) {
