@@ -1,5 +1,13 @@
 // Shared helpers for the collector scripts (Node 20+, no dependencies).
 export const env = process.env;
+// Pasted keys sometimes carry spaces, line breaks or a label; keep only the key itself.
+for (const k of ['BLIZZARD_CLIENT_ID', 'BLIZZARD_CLIENT_SECRET', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY']) {
+  if (!env[k]) continue;
+  const parts = String(env[k]).split(/\s+/).filter(Boolean);
+  const pick = k === 'SUPABASE_SERVICE_ROLE_KEY' ? parts.find((p) => /^(sb_secret_|eyJ)/.test(p))
+    : k === 'SUPABASE_URL' ? parts.find((p) => /^https?:\/\//.test(p)) : null;
+  env[k] = pick || parts[0] || '';
+}
 export const REGION = (env.REGION || 'eu').toLowerCase();
 export const RULESET_ID = Number(env.RULESET_ID || 1); // 1 = PvP
 export const API = `https://${REGION}.api.blizzard.com`;
