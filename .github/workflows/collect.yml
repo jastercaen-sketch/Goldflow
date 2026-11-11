@@ -1,0 +1,39 @@
+name: Goldflow AH scan
+
+on:
+  schedule:
+    - cron: '23 * * * *'   # every hour at :23
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Process even if the snapshot has not changed'
+        type: boolean
+        default: false
+
+concurrency:
+  group: goldflow-collector
+  cancel-in-progress: false
+
+defaults:
+  run:
+    working-directory: goldflow   # the code lives in the goldflow/ folder of the repo
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Scan auction house
+        run: node collector/collect.mjs
+        env:
+          BLIZZARD_CLIENT_ID: ${{ secrets.BLIZZARD_CLIENT_ID }}
+          BLIZZARD_CLIENT_SECRET: ${{ secrets.BLIZZARD_CLIENT_SECRET }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          REGION: eu
+          RULESET_ID: 1
+          FORCE: ${{ inputs.force && '1' || '' }}
