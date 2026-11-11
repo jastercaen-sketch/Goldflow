@@ -7,7 +7,7 @@ import {
 
 need('BLIZZARD_CLIENT_ID', 'BLIZZARD_CLIENT_SECRET', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY');
 const MAX_NEW_ITEMS = Number(env.MAX_NEW_ITEMS || 600);
-const MAX_DEALS = Number(env.MAX_DEALS || 500);
+const MAX_DEALS = Number(env.MAX_DEALS || 1000);
 
 const [settingsRow] = await sb('settings?id=eq.1&select=*');
 const settings = normSettings(settingsRow);
@@ -85,7 +85,9 @@ for (const [itemId, ladder] of ladders) {
   const item = meta.get(itemId) || {};
   const st = stats.get(itemId);
   ladder.sort((a, b) => a.unit_price - b.unit_price);
-  for (const plan of [planFlip(ladder, st, item, settings), planVendorFlip(ladder, item, settings)]) {
+  // store deals from 5s profit up; the website applies each player's own minimum and budget
+  const loose = { ...settings, min_profit: 500 };
+  for (const plan of [planFlip(ladder, st, item, loose), planVendorFlip(ladder, item, loose)]) {
     if (!plan || !plan.verdict) continue;
     plan.buys = ladder.filter((l) => l.unit_price <= plan.maxPrice).slice(0, plan.listings).slice(0, 25);
     deals.push({
@@ -95,8 +97,11 @@ for (const [itemId, ladder] of ladders) {
     });
   }
 }
+// keep the best overall, plus the best small high-return deals for tight budgets
 deals.sort((a, b) => b.profit * b.confidence - a.profit * a.confidence);
-const keep = deals.slice(0, MAX_DEALS);
+const top = deals.slice(0, Math.round(MAX_DEALS * 0.7));
+const rest = deals.slice(top.length).sort((a, b) => b.roi * b.confidence - a.roi * a.confidence);
+const keep = top.concat(rest.slice(0, MAX_DEALS - top.length));
 await sb(`deals?house_id=eq.${houseId}`, { method: 'DELETE', prefer: 'return=minimal' });
 await sbInsert('deals', keep, { batch: 500 });
 log(`Deals: ${keep.length} kept (${keep.filter((d) => d.verdict === 'buy').length} "worth buying"). Done.`);
