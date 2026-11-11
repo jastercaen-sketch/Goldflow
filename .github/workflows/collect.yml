@@ -2,7 +2,7 @@ name: Goldflow AH scan
 
 on:
   schedule:
-    - cron: '23 * * * *'   # every hour at :23
+    - cron: '35 * * * *'   # every hour at :35, ten minutes after Blizzard publishes its snapshot
   workflow_dispatch:
     inputs:
       force:
@@ -36,4 +36,5 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           REGION: eu
           RULESET_ID: 1
+          MAX_NEW_ITEMS: 1000
           FORCE: ${{ inputs.force && '1' || '' }}
