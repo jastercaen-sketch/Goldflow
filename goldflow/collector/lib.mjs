@@ -1,16 +1,22 @@
 // Shared helpers for the collector scripts (Node 20+, no dependencies).
 export const env = process.env;
 // Pasted keys sometimes carry spaces, line breaks or a label; keep only the key itself.
+const keyShape = {};
 for (const k of ['BLIZZARD_CLIENT_ID', 'BLIZZARD_CLIENT_SECRET', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY']) {
   if (!env[k]) continue;
   const parts = String(env[k]).split(/\s+/).filter(Boolean);
-  const pick = k === 'SUPABASE_SERVICE_ROLE_KEY' ? parts.find((p) => /^(sb_secret_|eyJ)/.test(p))
-    : k === 'SUPABASE_URL' ? parts.find((p) => /^https?:\/\//.test(p)) : null;
+  keyShape[k] = parts.map((p) => p.length).join(' + ');
+  let pick = null;
+  if (k === 'SUPABASE_SERVICE_ROLE_KEY') {
+    // a key copied from a wrapped line arrives in pieces: rejoin everything from the sb_secret_ / eyJ start
+    const i = parts.findIndex((p) => /^(sb_secret_|eyJ)/.test(p));
+    if (i >= 0) pick = parts.slice(i).join('').replace(/[^A-Za-z0-9_.-]/g, '');
+  } else if (k === 'SUPABASE_URL') pick = parts.find((p) => /^https?:\/\//.test(p));
   env[k] = pick || parts[0] || '';
 }
 {
   const k = env.SUPABASE_SERVICE_ROLE_KEY || '';
-  if (k) console.log(`Supabase key check: ${k.length} characters, starts with ${k.startsWith('sb_secret_') ? 'sb_secret_' : k.startsWith('eyJ') ? 'eyJ (legacy key)' : k.startsWith('sb_publishable_') ? 'sb_publishable_ (wrong key: that is the public one)' : 'something unexpected'}${/[^\x21-\x7e]/.test(k) ? ', contains hidden-dot characters (copied from the masked text)' : ''}`);
+  if (k) console.log(`Supabase key check: pasted as pieces of ${keyShape.SUPABASE_SERVICE_ROLE_KEY} characters, using ${k.length} characters, starts with ${k.startsWith('sb_secret_') ? 'sb_secret_' : k.startsWith('eyJ') ? 'eyJ (legacy key)' : k.startsWith('sb_publishable_') ? 'sb_publishable_ (wrong key: that is the public one)' : 'something unexpected'}`);
 }
 export const REGION = (env.REGION || 'eu').toLowerCase();
 export const RULESET_ID = Number(env.RULESET_ID || 1); // 1 = PvP
