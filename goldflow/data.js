@@ -35,7 +35,11 @@ export async function supabaseBackend(cfg) {
     async saveSettings(patch) { ok(await db.from('settings').update({ ...patch, updated_at: new Date().toISOString() }).eq('id', 1)); },
     async status() {
       if (!houseId) return null;
-      return ok(await db.from('snapshots').select('*').eq('house_id', houseId).order('ts', { ascending: false }).limit(1))[0] || null;
+      const last = ok(await db.from('snapshots').select('*').eq('house_id', houseId).order('ts', { ascending: false }).limit(1))[0];
+      if (!last) return null;
+      const since = new Date(Date.now() - 7 * 864e5).toISOString();
+      const { count } = await db.from('snapshots').select('ts', { count: 'exact', head: true }).eq('house_id', houseId).gte('ts', since);
+      return { ...last, historyHours: count || 0 };
     },
     async deals() {
       if (!houseId) return [];
@@ -305,7 +309,7 @@ export function demoBackend() {
     async updateMe(id, patch) { Object.assign(members.find((m) => m.user_id === id), patch); },
     async settings() { return settings; },
     async saveSettings(p) { settings = { ...settings, ...p }; emit('deals'); },
-    async status() { return { ts: M.ts, auctions: [...M.ladders.values()].reduce((a, l) => a + l.length, 0), items: M.items.length }; },
+    async status() { return { ts: M.ts, auctions: [...M.ladders.values()].reduce((a, l) => a + l.length, 0), items: M.items.length, historyHours: 118 }; },
     async deals() { return computeDeals(); },
     async market(ids) { return new Map(ids.filter((i) => M.stats.has(i)).map((i) => [i, M.stats.get(i)])); },
     async search(q) {
