@@ -1,0 +1,1 @@
+{"name":"goldflow","private":true,"type":"module","scripts":{"collect":"node collector/collect.mjs","discover":"node collector/discover.mjs","test":"node test/engine.test.mjs"}}
