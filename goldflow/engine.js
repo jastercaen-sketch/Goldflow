@@ -83,6 +83,8 @@ export function confidence({ stats, item, qty, ref, floorAfter, firstPrice }, s)
 
   if (GEAR.test(item?.item_class || '')) { c -= 15; tags.push('gear: check suffix/stats'); }
   if (firstPrice != null && ref && firstPrice < ref * 0.25) { c -= 15; tags.push('too good to be true?'); }
+  // with under 12 hours of history nothing can be a confident "buy" yet
+  if (snaps < 12) c = Math.min(c, 60);
   return { score: Math.max(0, Math.min(100, Math.round(c))), tags };
 }
 
