@@ -1,6 +1,7 @@
 // Goldflow front end. Plain ES modules, no build step.
 import {
   planFlip, craftQuote, ledger, ladderCost, referencePrice, normSettings, splitMoney, parseMoney, fmtMoney, VERDICT_TEXT,
+  fitBudget, budgetMinProfit, verdictFor,
 } from './engine.js';
 import { supabaseBackend, demoBackend } from './data.js';
 
@@ -54,6 +55,18 @@ const info = (id) => S.market.get(id) || { item_id: id, name: null };
 const member = (uid) => S.members.find((m) => m.user_id === uid) || { display_name: 'Someone', color: '#999' };
 const claimFor = (itemId) => S.claims.find((c) => c.item_id === itemId);
 
+// Deals as this player sees them: trimmed to their budget and judged against their minimum profit.
+function myDeals() {
+  const s = set(); const b = S.budget || null; const minP = budgetMinProfit(b, s);
+  return S.deals.map((d) => {
+    const p = fitBudget(d.plan, b, s);
+    if (!p) return null;
+    const v = d.kind === 'vendor' ? (p.profit >= minP / 4 ? 'buy' : null) : verdictFor(p.profit, p.roi, d.confidence, { ...s, min_profit: minP });
+    return v ? { ...d, plan: p, profit: p.profit, roi: p.roi, verdict: v } : null;
+  }).filter(Boolean);
+}
+const saveBudget = debounce((c) => S.api.updateMe(S.me.user_id, { budget: c }).catch(() => {}), 600);
+
 async function ensureMarket(ids) {
   const miss = [...new Set(ids)].filter((id) => id && !S.market.has(id));
   if (!miss.length) return;
@@ -99,7 +112,7 @@ function shell() {
   const L = ledger(S.tx);
   const total = Object.values(L).reduce((a, u) => a + u.realized, 0);
   const week = Object.values(L).reduce((a, u) => a + u.events.filter((e) => Date.now() - new Date(e.at) < 7 * 864e5).reduce((x, e) => x + e.delta, 0), 0);
-  const buyCount = S.deals.filter((d) => d.verdict === 'buy' && !claimFor(d.item_id)).length;
+  const buyCount = myDeals().filter((d) => d.verdict === 'buy' && !claimFor(d.item_id)).length;
   return `
   ${S.api.demo ? '<div class="demo-ribbon">Demo mode — prices are synthetic. Add your Supabase keys to <b>config.js</b> to go live.</div>' : ''}
   <div class="scene" aria-hidden="true"></div>
@@ -108,6 +121,7 @@ function shell() {
     <div class="purse">
       <div class="stat"><b>${money(week, { sign: true, tone: true })}</b><span>profit, last 7 days</span></div>
       <div class="stat"><b>${money(total, { sign: true, tone: true })}</b><span>profit, all time</span></div>
+      ${S.budget ? `<a class="stat" href="#deals" style="text-decoration:none"><b>${money(S.budget)}</b><span>your budget</span></a>` : ''}
       <div class="who"><span class="dot" style="--c:${esc(S.me.color)}"></span>${esc(S.me.display_name)}
         <button class="btn ghost small" data-act="settings" style="color:#e7cf9f">Settings</button>
         <button class="btn ghost small" data-act="signout" style="color:#e7cf9f">Sign out</button></div>
@@ -151,7 +165,7 @@ const VIEWS = {};
 
 VIEWS.hearth = () => {
   const s = set();
-  const top = S.deals.filter((d) => d.verdict === 'buy' && !claimFor(d.item_id)).slice(0, 6);
+  const top = myDeals().filter((d) => d.verdict === 'buy' && !claimFor(d.item_id)).sort((a, b) => b.profit * b.confidence - a.profit * a.confidence).slice(0, 6);
   const L = ledger(S.tx);
   const users = S.members.map((m) => ({ m, u: L[m.user_id] || { realized: 0, events: [], items: {} } }));
   const week = (u) => u.events.filter((e) => Date.now() - new Date(e.at) < 7 * 864e5).reduce((a, e) => a + e.delta, 0);
@@ -163,7 +177,7 @@ VIEWS.hearth = () => {
   ${setupNotices()}${statusLine()}
   <div class="hearth">
     <section class="panel">
-      <h3>What is worth buying<small>Unclaimed deals with a credible resale price and buyers</small></h3>
+      <h3>What is worth buying<small>${S.budget ? `Unclaimed deals that fit your ${esc(fmtMoney(S.budget))}` : 'Unclaimed deals with a credible resale price and buyers'}</small></h3>
       ${top.length ? top.map((d) => {
         const m = info(d.item_id);
         return `<div class="mini">${icon(m)}<div class="grow"><a href="#" class="iname q-${m.quality || 'COMMON'}" data-act="item" data-id="${d.item_id}">${esc(itemName(m))}</a>
@@ -232,8 +246,9 @@ function weeklyChart(L) {
 // ---------- Deal board
 VIEWS.deals = () => {
   const f = S.ui.deals;
-  const classes = [...new Set(S.deals.map((d) => info(d.item_id).item_class).filter(Boolean))].sort();
-  let rows = S.deals.filter((d) => {
+  const all = myDeals();
+  const classes = [...new Set(all.map((d) => info(d.item_id).item_class).filter(Boolean))].sort();
+  let rows = all.filter((d) => {
     const m = info(d.item_id);
     if (f.q && !itemName(m).toLowerCase().includes(f.q.toLowerCase())) return false;
     if (f.verdict !== 'all' && d.verdict !== f.verdict) return false;
@@ -247,10 +262,11 @@ VIEWS.deals = () => {
   rows = rows.sort((a, b) => key(b) - key(a));
   const sortBtn = (k, label) => `<button class="sort" data-act="sort-deals" data-k="${k}" aria-pressed="${f.sort === k}">${label}</button>`;
   return `
-  <div class="row"><h2>Deal board</h2><span class="spacer"></span><span class="muted">${rows.length} of ${S.deals.length} deals</span></div>
+  <div class="row"><h2>Deal board</h2><span class="spacer"></span><span class="muted">${rows.length} of ${all.length} deals${S.budget ? ` within ${esc(fmtMoney(S.budget))}` : ''}</span></div>
   <p class="lede">Each deal is a buy plan: which listings to take, the price you can realistically relist at after undercutting what's left, and whether the market buys that much within ${num(set().hold_days, 1)} days.</p>
   ${setupNotices()}${statusLine()}
   <div class="filters">
+    <label class="f">My gold<input type="search" id="budget" value="${S.budget ? esc(fmtMoney(S.budget)) : ''}" placeholder="e.g. 3g 50s" style="width:130px" autocomplete="off"></label>
     <label class="f">Item<input type="search" data-filter="deals.q" value="${esc(f.q)}" placeholder="Search deals"></label>
     <label class="f">Verdict<select data-filter="deals.verdict">
       ${[['all', 'All'], ['buy', 'Buy'], ['consider', 'Consider'], ['wait', 'Wait — low confidence']].map(([v, l]) => `<option value="${v}" ${f.verdict === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
@@ -263,7 +279,7 @@ VIEWS.deals = () => {
   ${rows.length ? `<div class="tablewrap"><table class="t">
     <thead><tr><th>Item</th><th>Verdict</th><th>Buy plan</th><th class="num">Cost</th><th class="num">List at</th><th class="num">${sortBtn('profit', 'Net profit')}</th><th class="num">${sortBtn('roi', 'ROI')}</th><th>${sortBtn('confidence', 'Confidence')}</th><th class="num">Sold/day</th><th></th></tr></thead>
     <tbody>${rows.map(dealRow).join('')}</tbody></table></div>`
-    : `<div class="empty">${S.deals.length ? 'No deals match these filters.' : 'No deals yet. They appear after the scanner has a few hours of price history.'}</div>`}
+    : `<div class="empty">${S.budget && S.deals.length ? `Nothing fits ${esc(fmtMoney(S.budget))} right now. Try a bit more gold, or check back after the next scan.` : S.deals.length ? 'No deals match these filters.' : 'No deals yet. They appear after the scanner has a few hours of price history.'}</div>`}
   <p class="kbd" style="margin-top:14px">Net profit already subtracts the ${pct(set().ah_cut)} AH cut and expected deposits. Sort: ${sortBtn('score', 'best overall')}</p>`;
 };
 
@@ -274,7 +290,7 @@ function dealRow(d) {
   return `<tr class="${c ? 'claimed' : ''}">
     <td>${item(m, { sub: esc(m.item_class || '') })}${claimNote(c)}</td>
     <td>${seal(d.verdict, d.kind)}${d.verdict === 'wait' ? '<div class="faint" style="font-size:13px;margin-top:3px">High margin, low confidence</div>' : ''}</td>
-    <td>Buy <b>${num(p.qty)}</b> from ${p.listings} listing${p.listings > 1 ? 's' : ''},<br>up to ${money(p.maxPrice)} each${tags(p.tags)}</td>
+    <td>Buy <b>${num(p.qty)}</b> from ${p.listings} listing${p.listings > 1 ? 's' : ''},<br>up to ${money(p.maxPrice)} each${p.trimmed ? '<div class="tags"><span class="tag">cut to fit your budget</span></div>' : ''}${tags(p.tags)}</td>
     <td class="num">${money(p.cost)}</td>
     <td class="num">${money(p.sellPrice)}<div class="faint" style="font-size:13px">${d.kind === 'vendor' ? 'to a vendor' : `typical ${fmtMoney(p.ref)}`}</div></td>
     <td class="num">${money(d.profit, { sign: true, tone: true })}</td>
@@ -723,7 +739,7 @@ function settingsModal() {
 document.addEventListener('click', async (e) => {
   const el = e.target.closest('[data-act]'); if (!el) return;
   const act = el.dataset.act; const id = Number(el.dataset.id) || null;
-  const deal = (iid, kind) => S.deals.find((d) => d.item_id === iid && (!kind || d.kind === kind));
+  const deal = (iid, kind) => myDeals().find((d) => d.item_id === iid && (!kind || d.kind === kind)) || S.deals.find((d) => d.item_id === iid && (!kind || d.kind === kind));
   try {
     switch (act) {
       case 'item': e.preventDefault(); if (dlg().open) dlg().close(); await itemModal(id); break;
@@ -767,6 +783,14 @@ document.addEventListener('click', async (e) => {
 document.addEventListener('input', (e) => {
   const el = e.target;
   if (el.id === 'msearch') return runSearch(el.value);
+  if (el.id === 'budget') {
+    const c = el.value.trim() ? parseMoney(el.value) : null;
+    if (el.value.trim() && c == null) return; // still typing
+    S.budget = c; saveBudget(c);
+    const pos = el.selectionStart; render();
+    const again = $('#budget'); if (again) { again.focus(); try { again.setSelectionRange(pos, pos); } catch { /* ignore */ } }
+    return;
+  }
   const path = el.dataset?.filter; if (!path) return;
   const [grp, key] = path.split('.');
   const v = el.type === 'checkbox' ? el.checked : el.type === 'range' || el.type === 'number' ? Number(el.value) : el.value;
@@ -853,6 +877,7 @@ async function start() {
     $('#out').onclick = async () => { await S.api.signOut(); location.reload(); };
     return;
   }
+  S.budget = S.me.budget ? Number(S.me.budget) : null;
   await loadAll(); route(); render();
   S.api.subscribe(debounce((table) => reload(table === 'watchlist' ? 'watch' : table), 400));
 }
