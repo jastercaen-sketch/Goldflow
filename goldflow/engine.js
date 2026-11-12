@@ -159,6 +159,60 @@ export function planVendorFlip(ladder, item, settings) {
   };
 }
 
+// ---------- conversions ----------
+// Items anyone can combine or split by right-clicking, at a fixed ratio (no profession needed).
+const ESSENCES = [
+  ['Magic', 10938, 10939], ['Astral', 10998, 11082], ['Mystic', 11134, 11135],
+  ['Nether', 11174, 11175], ['Eternal', 16202, 16203],
+];
+export const CONVERSIONS = ESSENCES.flatMap(([n, lesser, greater]) => [
+  { from: lesser, to: greater, inQty: 3, outQty: 1, verb: 'combine', fromName: `Lesser ${n} Essence`, toName: `Greater ${n} Essence` },
+  { from: greater, to: lesser, inQty: 1, outQty: 3, verb: 'split', fromName: `Greater ${n} Essence`, toName: `Lesser ${n} Essence` },
+]);
+
+// Buy the cheap form, convert it, sell the other form.
+// srcLadder: listings of what you buy; dstLadder/dstStats/dstItem: what you sell.
+export function planConversion(srcLadder, dstLadder, dstStats, dstItem, conv, settings) {
+  const s = normSettings(settings);
+  const ref = referencePrice(dstStats);
+  if (!ref || !srcLadder?.length) return null;
+  const D = (dstLadder || []).filter((x) => x.unit_price > 0 && x.quantity > 0);
+  const dstFloor = D.length ? Math.min(...D.map((x) => x.unit_price)) : Infinity;
+  const sellPrice = Math.floor(Math.min(ref, dstFloor) * (1 - s.undercut));
+  const dep = depositPerUnit(dstItem, s);
+  const netOut = Math.floor(sellPrice * (1 - s.ah_cut)) - dep;
+  if (netOut <= 0) return null;
+  const L = srcLadder.filter((x) => x.unit_price > 0 && x.quantity > 0).sort((a, b) => a.unit_price - b.unit_price);
+  const spd = dstStats?.sold_per_day7 == null ? null : Number(dstStats.sold_per_day7);
+  const cap = spd == null ? null : Math.max(conv.outQty, spd * s.hold_days);
+  const breakEven = (netOut * conv.outQty) / conv.inQty; // most you can pay per unit bought
+  let qty = 0, cost = 0, best = null;
+  for (let k = 0; k < L.length; k++) {
+    const l = L[k];
+    if (l.unit_price >= breakEven) break;
+    const outs = Math.floor((qty + l.quantity) / conv.inQty) * conv.outQty;
+    if (cap != null && k > 0 && outs > cap) break;
+    qty += l.quantity; cost += l.unit_price * l.quantity;
+    const revenue = outs * netOut;
+    const profit = revenue - cost;
+    if (outs > 0 && (!best || profit > best.profit)) best = { listings: k + 1, qty, cost, maxPrice: l.unit_price, outs, revenue, profit };
+  }
+  if (!best || best.profit <= 0) return null;
+  const roi = best.profit / Math.max(1, best.cost);
+  const conf = confidence({ stats: dstStats, item: dstItem, qty: best.outs, ref, floorAfter: isFinite(dstFloor) ? dstFloor : null,
+    firstPrice: (L[0].unit_price * conv.inQty) / conv.outQty }, s);
+  return {
+    kind: 'convert', ...best, sellPrice, ref, depositPerUnit: dep, netOut,
+    avgPrice: Math.round(best.cost / best.qty), floorAfter: isFinite(dstFloor) ? dstFloor : null,
+    convert: { to: conv.to, toName: conv.toName, fromName: conv.fromName, verb: conv.verb, inQty: conv.inQty, outQty: conv.outQty },
+    leftover: best.qty % conv.inQty,
+    roi, confidence: conf.score, tags: [conv.verb === 'combine' ? 'combine' : 'split', ...conf.tags],
+    soldPerDay: spd, daysToSell: spd ? best.outs / spd : null,
+    discount: 1 - (L[0].unit_price * conv.inQty) / conv.outQty / ref,
+    verdict: verdictFor(best.profit, roi, conf.score, s),
+  };
+}
+
 // ---------- budget ----------
 // Trim a buy plan to what fits in a budget (whole listings only) and re-price it:
 // buying fewer listings means undercutting a cheaper remaining listing.
@@ -172,8 +226,12 @@ export function fitBudget(plan, budget, settings) {
   }
   if (!k || k >= buys.length) return null;
   let sellPrice, revenue;
+  let outs = null;
   if (plan.kind === 'vendor') { sellPrice = plan.sellPrice; revenue = qty * sellPrice; }
-  else {
+  else if (plan.kind === 'convert') {
+    sellPrice = plan.sellPrice; outs = Math.floor(qty / plan.convert.inQty) * plan.convert.outQty;
+    revenue = outs * plan.netOut;
+  } else {
     sellPrice = Math.floor(Math.min(plan.ref, buys[k].unit_price) * (1 - s.undercut));
     revenue = Math.floor(qty * sellPrice * (1 - s.ah_cut)) - qty * (plan.depositPerUnit || 0);
   }
@@ -181,8 +239,9 @@ export function fitBudget(plan, budget, settings) {
   if (profit <= 0) return null;
   return {
     ...plan, listings: k, qty, cost, maxPrice: buys[k - 1].unit_price, avgPrice: Math.round(cost / qty),
-    sellPrice, revenue, profit, roi: profit / cost, floorAfter: plan.kind === 'vendor' ? plan.floorAfter : buys[k].unit_price,
-    daysToSell: plan.soldPerDay ? qty / plan.soldPerDay : null, buys: buys.slice(0, k), trimmed: true,
+    sellPrice, revenue, profit, roi: profit / cost, floorAfter: plan.kind === 'flip' ? buys[k].unit_price : plan.floorAfter,
+    ...(outs != null ? { outs, leftover: qty % plan.convert.inQty } : {}),
+    daysToSell: plan.soldPerDay ? (outs ?? qty) / plan.soldPerDay : null, buys: buys.slice(0, k), trimmed: true,
   };
 }
 // With a small purse, a deal is worth showing if it earns at least min_roi of the budget (never less than 5s).
