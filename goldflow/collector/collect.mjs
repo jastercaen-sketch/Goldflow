@@ -1,6 +1,6 @@
 // Goldflow collector: fetch the auction house, store an hourly snapshot, compute deals.
 // Run hourly (GitHub Actions does this for you). Env: see README.
-import { planFlip, planVendorFlip, normSettings } from '../engine.js';
+import { planFlip, planVendorFlip, planConversion, CONVERSIONS, normSettings } from '../engine.js';
 import {
   env, log, need, NS_STATIC, blizzard, fetchHouse, sb, sbAll, sbInsert, pool,
 } from './lib.mjs';
@@ -97,11 +97,23 @@ for (const [itemId, ladder] of ladders) {
     });
   }
 }
+// conversions: buy one form, right-click to combine/split, sell the other form
+for (const cv of CONVERSIONS) {
+  const src = ladders.get(cv.from); if (!src) continue;
+  const plan = planConversion(src, ladders.get(cv.to), stats.get(cv.to), meta.get(cv.to) || {}, cv, { ...settings, min_profit: 500 });
+  if (!plan || !plan.verdict) continue;
+  plan.buys = src.filter((l) => l.unit_price <= plan.maxPrice).slice(0, plan.listings).slice(0, 25);
+  deals.push({
+    house_id: houseId, item_id: cv.from, computed_at: now, kind: 'convert',
+    profit: Math.round(plan.profit), roi: Number(plan.roi.toFixed(4)), confidence: plan.confidence, verdict: plan.verdict, plan,
+  });
+}
 // keep the best overall, plus the best small high-return deals for tight budgets
 deals.sort((a, b) => b.profit * b.confidence - a.profit * a.confidence);
 const top = deals.slice(0, Math.round(MAX_DEALS * 0.7));
 const rest = deals.slice(top.length).sort((a, b) => b.roi * b.confidence - a.roi * a.confidence);
 const keep = top.concat(rest.slice(0, MAX_DEALS - top.length));
+for (const d of deals) if (d.kind === 'convert' && !keep.includes(d)) keep.push(d); // always show conversions
 await sb(`deals?house_id=eq.${houseId}`, { method: 'DELETE', prefer: 'return=minimal' });
 await sbInsert('deals', keep, { batch: 500 });
 log(`Deals: ${keep.length} kept (${keep.filter((d) => d.verdict === 'buy').length} "worth buying"). Done.`);
