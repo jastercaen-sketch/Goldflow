@@ -72,6 +72,10 @@ export async function supabaseBackend(cfg) {
       return ok(await db.from('latest_auctions').select('unit_price,quantity,time_left').eq('house_id', houseId).eq('item_id', id).order('unit_price').limit(200));
     },
     async watchlist() { return ok(await db.from('watchlist').select('*').order('created_at')); },
+    async bags() { const r = await db.from('bags').select('*').order('bought_at'); return r.error ? [] : r.data; },
+    async bagAdd(row) { ok(await db.from('bags').insert(row)); },
+    async bagSet(id, fields) { ok(await db.from('bags').update(fields).eq('id', id)); },
+    async bagRemove(id) { ok(await db.from('bags').delete().eq('id', id)); },
     async watchSet(item_id, fields) { ok(await db.from('watchlist').upsert({ item_id, ...fields })); },
     async watchRemove(item_id) { ok(await db.from('watchlist').delete().eq('item_id', item_id)); },
     async claims() {
@@ -101,7 +105,7 @@ export async function supabaseBackend(cfg) {
     async deleteRecipe(id) { ok(await db.from('recipes').delete().eq('id', id)); },
     subscribe(fn) {
       const ch = db.channel('goldflow');
-      for (const table of ['claims', 'transactions', 'watchlist', 'deals']) {
+      for (const table of ['claims', 'transactions', 'watchlist', 'deals', 'bags']) {
         ch.on('postgres_changes', { event: '*', schema: 'public', table }, () => fn(table));
       }
       ch.subscribe();
@@ -269,6 +273,9 @@ export function demoBackend() {
     { user_id: 'bro', kind: 'sell', item_id: id('Thorium Bar'), item_name: 'Thorium Bar', quantity: 10, unit_price: 2350, fee: 1175, occurred_at: day(0, 5) },
   ].map((t) => ({ id: tid(), fee: 0, note: null, ...t }));
   let claims = [{ id: 'c1', item_id: id('Thorium Bar'), claimed_by: 'bro', quantity: 40, max_price: 1700, note: 'Smelting run tonight', status: 'active', created_at: day(0, 1), expires_at: new Date(Date.now() + 4 * 36e5).toISOString() }];
+  let bags = [
+    { id: 'b1', user_id: 'me', item_id: id('Runecloth'), item_name: 'Runecloth', quantity: 20, unit_price: 800, posts: 1, bought_at: day(1) },
+  ];
   let watch = [
     { item_id: id('Black Lotus'), target_buy: 420000, target_sell: 560000, note: 'Raid nights spike', added_by: 'me', created_at: day(5) },
     { item_id: id('Arcanite Bar'), target_buy: 230000, target_sell: null, note: null, added_by: 'bro', created_at: day(4) },
@@ -321,6 +328,10 @@ export function demoBackend() {
     async history(i) { return { hourly: (M.hourly.get(i) || []).slice(-72), daily: M.daily.get(i) || [] }; },
     async ladder(i) { return [...(M.ladders.get(i) || [])].sort((a, b) => a.unit_price - b.unit_price); },
     async watchlist() { return watch; },
+    async bags() { return bags; },
+    async bagAdd(row) { bags.push({ id: 'b' + Math.random().toString(36).slice(2), posts: 0, bought_at: new Date().toISOString(), ...row }); emit('bags'); },
+    async bagSet(id, f) { Object.assign(bags.find((b) => b.id === id) || {}, f); emit('bags'); },
+    async bagRemove(id) { bags = bags.filter((b) => b.id !== id); emit('bags'); },
     async watchSet(item_id, f) { const w = watch.find((x) => x.item_id === item_id); if (w) Object.assign(w, f); else watch.push({ item_id, added_by: 'me', created_at: new Date().toISOString(), ...f }); emit('watchlist'); },
     async watchRemove(item_id) { watch = watch.filter((x) => x.item_id !== item_id); emit('watchlist'); },
     async claims() { return claims.filter((c) => c.status === 'active' && new Date(c.expires_at) > new Date()); },
