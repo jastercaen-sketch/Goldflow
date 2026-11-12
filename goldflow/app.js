@@ -181,7 +181,7 @@ VIEWS.hearth = () => {
       ${top.length ? top.map((d) => {
         const m = info(d.item_id);
         return `<div class="mini">${icon(m)}<div class="grow"><a href="#" class="iname q-${m.quality || 'COMMON'}" data-act="item" data-id="${d.item_id}">${esc(itemName(m))}</a>
-          <div class="sub">Buy ${num(d.plan.qty)} up to ${money(d.plan.maxPrice)} each, list at ${money(d.plan.sellPrice)}</div></div>
+          <div class="sub">${d.kind === 'convert' ? `Buy ${num(d.plan.qty)} up to ${money(d.plan.maxPrice)}, ${d.plan.convert.verb} into ${num(d.plan.outs)} ${esc(d.plan.convert.toName)}, list at ${money(d.plan.sellPrice)}` : `Buy ${num(d.plan.qty)} up to ${money(d.plan.maxPrice)} each, list at ${money(d.plan.sellPrice)}`}</div></div>
           <div style="text-align:right">${money(d.profit, { sign: true, tone: true })}<div class="sub">${pct(d.roi)} ROI</div></div>
           <button class="btn small" data-act="claim" data-id="${d.item_id}" data-kind="${d.kind}">Claim</button></div>`;
       }).join('') : '<div class="empty">Nothing clears the bar right now. Fresh listings arrive every hour.</div>'}
@@ -271,7 +271,7 @@ VIEWS.deals = () => {
     <label class="f">Verdict<select data-filter="deals.verdict">
       ${[['all', 'All'], ['buy', 'Buy'], ['consider', 'Consider'], ['wait', 'Wait — low confidence']].map(([v, l]) => `<option value="${v}" ${f.verdict === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
     <label class="f">Type<select data-filter="deals.kind">
-      ${[['all', 'Flips and vendor'], ['flip', 'AH flips'], ['vendor', 'Vendor flips']].map(([v, l]) => `<option value="${v}" ${f.kind === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      ${[['all', 'All deals'], ['flip', 'AH flips'], ['vendor', 'Vendor flips'], ['convert', 'Combine / split']].map(([v, l]) => `<option value="${v}" ${f.kind === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
     <label class="f">Category<select data-filter="deals.cls"><option value="all">All</option>${classes.map((c) => `<option ${f.cls === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></label>
     <label class="f">Confidence at least ${f.minConf}<input type="range" min="0" max="90" step="5" value="${f.minConf}" data-filter="deals.minConf"></label>
     <label class="chk"><input type="checkbox" data-filter="deals.hideClaimed" ${f.hideClaimed ? 'checked' : ''}> Hide claimed</label>
@@ -283,6 +283,11 @@ VIEWS.deals = () => {
   <p class="kbd" style="margin-top:14px">Net profit already subtracts the ${pct(set().ah_cut)} AH cut and expected deposits. Sort: ${sortBtn('score', 'best overall')}</p>`;
 };
 
+function convertNote(p) {
+  const c = p.convert;
+  const how = c.verb === 'combine' ? `right-click to combine ${c.inQty} into 1` : `right-click to split 1 into ${c.outQty}`;
+  return `<div style="margin-top:4px">then ${how}: <b>${num(p.outs)}</b> ${esc(c.toName)}${p.leftover ? `<div class="faint" style="font-size:13px">${p.leftover} left over (keep or resell)</div>` : ''}</div>`;
+}
 function dealRow(d) {
   const m = info(d.item_id); const p = d.plan; const c = claimFor(d.item_id);
   const mine = c && c.claimed_by === S.me.user_id;
@@ -290,9 +295,9 @@ function dealRow(d) {
   return `<tr class="${c ? 'claimed' : ''}">
     <td>${item(m, { sub: esc(m.item_class || '') })}${claimNote(c)}</td>
     <td>${seal(d.verdict, d.kind)}${d.verdict === 'wait' ? '<div class="faint" style="font-size:13px;margin-top:3px">High margin, low confidence</div>' : ''}</td>
-    <td>Buy <b>${num(p.qty)}</b> from ${p.listings} listing${p.listings > 1 ? 's' : ''},<br>up to ${money(p.maxPrice)} each${p.trimmed ? '<div class="tags"><span class="tag">cut to fit your budget</span></div>' : ''}${tags(p.tags)}</td>
+    <td>Buy <b>${num(p.qty)}</b> from ${p.listings} listing${p.listings > 1 ? 's' : ''},<br>up to ${money(p.maxPrice)} each${d.kind === 'convert' ? convertNote(p) : ''}${p.trimmed ? '<div class="tags"><span class="tag">cut to fit your budget</span></div>' : ''}${tags(p.tags)}</td>
     <td class="num">${money(p.cost)}</td>
-    <td class="num">${money(p.sellPrice)}<div class="faint" style="font-size:13px">${d.kind === 'vendor' ? 'to a vendor' : `typical ${fmtMoney(p.ref)}`}</div></td>
+    <td class="num">${money(p.sellPrice)}<div class="faint" style="font-size:13px">${d.kind === 'vendor' ? 'to a vendor' : d.kind === 'convert' ? `per ${esc(p.convert.toName)}, typical ${fmtMoney(p.ref)}` : `typical ${fmtMoney(p.ref)}`}</div></td>
     <td class="num">${money(d.profit, { sign: true, tone: true })}</td>
     <td class="num">${pct(d.roi)}</td>
     <td>${conf(d.confidence)}</td>
