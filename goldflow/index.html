@@ -121,6 +121,11 @@ table.t tr.claimed{background:repeating-linear-gradient(135deg,rgba(143,195,214,
 table.t tr.expand td{background:#f4e7c9; border-bottom:2px solid var(--parchment-edge)}
 th button.sort{all:unset; cursor:pointer} th button.sort:hover{color:var(--ink)}
 th button.sort[aria-pressed=true]{color:var(--ink); text-decoration:underline; text-underline-offset:3px}
+th button.sort .arr{margin-left:4px; font-size:11px; opacity:.45; text-decoration:none; display:inline-block}
+th button.sort[aria-pressed=true] .arr{opacity:1}
+.kind{display:inline-block; font-size:12px; font-weight:700; padding:0 7px; border-radius:9px; margin-right:4px; background:rgba(120,90,40,.14); color:#6b4d1c}
+.kind.k-vendor{background:rgba(11,98,191,.12); color:#0b4f99}
+.kind.k-convert{background:rgba(110,60,160,.13); color:#5b2f8a}
 
 /* items */
 .item{display:inline-flex; align-items:center; gap:9px; min-width:0}
