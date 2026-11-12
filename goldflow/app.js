@@ -198,7 +198,7 @@ VIEWS.hearth = () => {
       ${top.length ? top.map((d) => {
         const m = info(d.item_id);
         return `<div class="mini">${icon(m)}<div class="grow"><a href="#" class="iname q-${m.quality || 'COMMON'}" data-act="item" data-id="${d.item_id}">${esc(itemName(m))}</a>
-          <div class="sub">${d.kind === 'convert' ? `Buy ${num(d.plan.qty)} up to ${money(d.plan.maxPrice)}, ${d.plan.convert.verb} into ${num(d.plan.outs)} ${esc(d.plan.convert.toName)}, list at ${money(d.plan.sellPrice)}` : `Buy ${num(d.plan.qty)} up to ${money(d.plan.maxPrice)} each, list at ${money(d.plan.sellPrice)}`}</div></div>
+          <div class="sub"><span class="kind k-${d.kind}">${KIND_LABEL[d.kind] || d.kind}</span> ${d.kind === 'convert' ? `Buy ${num(d.plan.qty)} up to ${money(d.plan.maxPrice)}, ${d.plan.convert.verb} into ${num(d.plan.outs)} ${esc(d.plan.convert.toName)}, list at ${money(d.plan.sellPrice)}` : `Buy ${num(d.plan.qty)} up to ${money(d.plan.maxPrice)} each, list at ${money(d.plan.sellPrice)}`}</div></div>
           <div style="text-align:right">${money(d.profit, { sign: true, tone: true })}<div class="sub">${pct(d.roi)} ROI</div></div>
           <button class="btn small" data-act="claim" data-id="${d.item_id}" data-kind="${d.kind}">Claim</button></div>`;
       }).join('') : '<div class="empty">Nothing clears the bar right now. Fresh listings arrive every hour.</div>'}
@@ -275,9 +275,13 @@ VIEWS.deals = () => {
     if (f.hideClaimed && claimFor(d.item_id)) return false;
     return true;
   });
-  const key = { score: (d) => d.profit * d.confidence, profit: (d) => d.profit, roi: (d) => d.roi, confidence: (d) => d.confidence }[f.sort];
-  rows = rows.sort((a, b) => key(b) - key(a));
-  const sortBtn = (k, label) => `<button class="sort" data-act="sort-deals" data-k="${k}" aria-pressed="${f.sort === k}">${label}</button>`;
+  const key = {
+    score: (d) => d.profit * d.confidence, profit: (d) => d.profit, roi: (d) => d.roi, confidence: (d) => d.confidence,
+    cost: (d) => d.plan.cost, list: (d) => d.plan.sellPrice, spd: (d) => d.plan.soldPerDay,
+  }[f.sort] || ((d) => d.profit * d.confidence);
+  const dir = f.dir === 'asc' ? 1 : -1;
+  rows = rows.sort((a, b) => { const x = key(a), y = key(b); if (x == null) return 1; if (y == null) return -1; return (x - y) * dir; });
+  const sortBtn = (k, label) => `<button class="sort" data-act="sort-deals" data-k="${k}" aria-pressed="${f.sort === k}" title="Sort by ${label.toLowerCase()}">${label}<span class="arr">${f.sort === k ? (f.dir === 'asc' ? '▲' : '▼') : '↕'}</span></button>`;
   return `
   <div class="row"><h2>Deal board</h2><span class="spacer"></span><span class="muted">${rows.length} of ${all.length} deals${S.budget ? ` within ${esc(fmtMoney(S.budget))}` : ''}</span></div>
   <p class="lede">Each deal is a buy plan: which listings to take, the price you can realistically relist at after undercutting what's left, and whether the market buys that much within ${num(set().hold_days, 1)} days.</p>
@@ -294,12 +298,13 @@ VIEWS.deals = () => {
     <label class="chk"><input type="checkbox" data-filter="deals.hideClaimed" ${f.hideClaimed ? 'checked' : ''}> Hide claimed</label>
   </div>
   ${rows.length ? `<div class="tablewrap"><table class="t">
-    <thead><tr><th>Item</th><th>Verdict</th><th>Buy plan</th><th class="num">Cost</th><th class="num">List at</th><th class="num">${sortBtn('profit', 'Net profit')}</th><th class="num">${sortBtn('roi', 'ROI')}</th><th>${sortBtn('confidence', 'Confidence')}</th><th class="num">Sold/day</th><th></th></tr></thead>
+    <thead><tr><th>Item</th><th>Verdict</th><th>Buy plan</th><th class="num">${sortBtn('cost', 'Cost')}</th><th class="num">${sortBtn('list', 'List at')}</th><th class="num">${sortBtn('profit', 'Net profit')}</th><th class="num">${sortBtn('roi', 'ROI')}</th><th>${sortBtn('confidence', 'Confidence')}</th><th class="num">${sortBtn('spd', 'Sold/day')}</th><th></th></tr></thead>
     <tbody>${rows.map(dealRow).join('')}</tbody></table></div>`
     : `<div class="empty">${S.budget && S.deals.length ? `Nothing fits ${esc(fmtMoney(S.budget))} right now. Try a bit more gold, or check back after the next scan.` : S.deals.length ? 'No deals match these filters.' : 'No deals yet. They appear after the scanner has a few hours of price history.'}</div>`}
   <p class="kbd" style="margin-top:14px">Net profit already subtracts the ${pct(set().ah_cut)} AH cut and expected deposits. Sort: ${sortBtn('score', 'best overall')}</p>`;
 };
 
+const KIND_LABEL = { flip: 'AH flip', vendor: 'Vendor flip', convert: 'Combine/split' };
 function convertNote(p) {
   const c = p.convert;
   const how = c.verb === 'combine' ? `right-click to combine ${c.inQty} into 1` : `right-click to split 1 into ${c.outQty}`;
@@ -310,7 +315,7 @@ function dealRow(d) {
   const mine = c && c.claimed_by === S.me.user_id;
   const watching = S.watch.some((w) => w.item_id === d.item_id);
   return `<tr class="${c ? 'claimed' : ''}">
-    <td>${item(m, { sub: esc(m.item_class || '') })}${claimNote(c)}</td>
+    <td>${item(m, { sub: `<span class="kind k-${d.kind}">${KIND_LABEL[d.kind] || d.kind}</span> ${esc(m.item_class || '')}` })}${claimNote(c)}</td>
     <td>${seal(d.verdict, d.kind)}${d.verdict === 'wait' ? '<div class="faint" style="font-size:13px;margin-top:3px">High margin, low confidence</div>' : ''}</td>
     <td>Buy <b>${num(p.qty)}</b> from ${p.listings} listing${p.listings > 1 ? 's' : ''},<br>up to ${money(p.maxPrice)} each${d.kind === 'convert' ? convertNote(p) : ''}${p.trimmed ? '<div class="tags"><span class="tag">cut to fit your budget</span></div>' : ''}${tags(p.tags)}</td>
     <td class="num">${money(p.cost)}</td>
@@ -829,7 +834,9 @@ document.addEventListener('click', async (e) => {
       }
       case 'watch-edit': await itemModal(id); break;
       case 'watch-remove': await S.api.watchRemove(id); toast('Removed from the watchlist'); await reload('watch'); break;
-      case 'sort-deals': S.ui.deals.sort = el.dataset.k; renderMain(); break;
+      case 'sort-deals': { const f = S.ui.deals; const k = el.dataset.k;
+        if (f.sort === k) f.dir = f.dir === 'asc' ? 'desc' : 'asc'; else { f.sort = k; f.dir = k === 'cost' ? 'asc' : 'desc'; }
+        renderMain(); break; }
       case 'sort-craft': S.ui.craft.sort = el.dataset.k; renderMain(); break;
       case 'craft-open': {
         const rid = Number(el.dataset.id); S.ui.craft.open = S.ui.craft.open === rid ? null : rid; renderMain();
