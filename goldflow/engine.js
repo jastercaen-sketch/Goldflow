@@ -250,6 +250,25 @@ export function budgetMinProfit(budget, settings) {
   return budget ? Math.min(s.min_profit, Math.max(500, Math.round(budget * s.min_roi))) : s.min_profit;
 }
 
+// ---------- my bags ----------
+// Faction AH, 24h post: the deposit is 60% of the vendor price for the whole listing, at least 1s (WoW Forever).
+// You get it back if it sells; an expired post loses it. So every failed post raises your break-even price.
+export const DEPOSIT_24H = 0.6, MIN_DEPOSIT = 100;
+export function postDeposit(sellPrice, qty) {
+  return Math.max(MIN_DEPOSIT, Math.round((Number(sellPrice) || 0) * DEPOSIT_24H * Math.max(1, Number(qty) || 1)));
+}
+// Lowest price each that still breaks even if the stack sells on post 1..n.
+export function breakEven({ quantity, unit_price, sell_price }, settings, n = 5) {
+  const s = normSettings(settings);
+  const q = Math.max(1, Number(quantity) || 1);
+  const dep = postDeposit(sell_price, q);
+  const cost = (Number(unit_price) || 0) * q;
+  return Array.from({ length: n }, (_, k) => ({
+    post: k + 1, lost: k * dep, deposit: dep,
+    each: Math.ceil((cost + k * dep) / (q * (1 - s.ah_cut))),
+  }));
+}
+
 // ---------- crafting ----------
 // priceOf(itemId) -> item_market row (or undefined)
 export function craftQuote(recipe, priceOf, settings, { crafts = 1 } = {}) {
