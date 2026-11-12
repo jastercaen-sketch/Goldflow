@@ -1,7 +1,7 @@
 // Goldflow front end. Plain ES modules, no build step.
 import {
   planFlip, craftQuote, ledger, ladderCost, referencePrice, normSettings, splitMoney, parseMoney, fmtMoney, VERDICT_TEXT,
-  fitBudget, budgetMinProfit, verdictFor,
+  fitBudget, budgetMinProfit, verdictFor, breakEven,
 } from './engine.js';
 import { supabaseBackend, demoBackend } from './data.js';
 
@@ -38,7 +38,7 @@ function toast(msg) {
 // ---------------------------------------------------------------- state
 const S = {
   api: null, me: null, members: [], settings: {}, status: null, deals: [], market: new Map(), ladders: new Map(),
-  claims: [], watch: [], tx: [], recipes: [], route: 'hearth',
+  claims: [], watch: [], bags: [], tx: [], recipes: [], route: 'hearth',
   ui: {
     deals: { q: '', verdict: 'all', kind: 'all', minConf: 0, hideClaimed: false, cls: 'all', sort: 'score' },
     craft: { prof: 'all', q: '', verifiedOnly: false, open: null, crafts: 5, sort: 'profit' },
@@ -48,7 +48,7 @@ const S = {
 };
 const ROUTES = [
   ['hearth', 'The Hearth'], ['deals', 'Deal Board'], ['crafting', 'Crafting Bench'],
-  ['watchlist', 'Watchlist'], ['ledger', 'Ledger'], ['market', 'Market'],
+  ['watchlist', 'Watchlist'], ['bags', 'My bags'], ['ledger', 'Ledger'], ['market', 'Market'],
 ];
 const set = () => normSettings(S.settings);
 const info = (id) => S.market.get(id) || { item_id: id, name: null };
@@ -82,7 +82,7 @@ function icon(m, big = false) {
   return `<span class="icon ${big ? 'big' : ''} q-${q}" aria-hidden="true">${esc(itemName(m)[0])}</span>`;
 }
 function item(m, { sub = '' } = {}) {
-  return `<span class="item">${icon(m)}<span><a href="#" class="iname q-${m?.quality || 'COMMON'}" data-act="item" data-id="${m?.item_id}">${esc(itemName(m))}</a>${sub ? `<br><span class="faint" style="font-size:14px">${sub}</span>` : ''}</span></span>`;
+  return `<span class="item">${icon(m)}<span><a href="#" class="iname q-${m?.quality || 'COMMON'}" data-act="item" data-id="${m?.item_id}">${esc(itemName(m))}</a>${m?.name ? `<button type="button" class="copy" data-act="copy" data-name="${esc(m.name)}" title="Copy the name, then paste it in the AH search">Copy</button>` : ''}${sub ? `<br><span class="faint" style="font-size:14px">${sub}</span>` : ''}</span></span>`;
 }
 function seal(verdict, kind) {
   if (kind === 'vendor') return '<span class="seal vendor">Vendor flip</span>';
@@ -381,6 +381,53 @@ function craftDetail(r, q) {
     ${short.length ? `<p class="notice" style="margin-top:12px">Not enough listed right now for ${esc(short.join(', '))} — the rest is priced at today's typical price.</p>` : ''}
     ${q.craftsPerDay != null && n > q.craftsPerDay * s.hold_days ? `<p class="notice">The market only takes about ${num(q.craftsPerDay * s.hold_days, 1)} crafts' worth in ${num(s.hold_days)} days. Selling ${n} may push the price down.</p>` : ''}
     ${r.notes ? `<p class="muted">${esc(r.notes)}</p>` : ''}`;
+}
+
+// ---------- My bags: what you paid, and the lowest price that still breaks even
+const ordinal = (n) => ['1st', '2nd', '3rd', '4th', '5th'][n - 1] || `${n}th`;
+const sinceText = (ts) => { const h = Math.round((Date.now() - new Date(ts)) / 36e5); return h < 1 ? 'just now' : h < 48 ? `${h} h ago` : `${Math.round(h / 24)} days ago`; };
+VIEWS.bags = () => {
+  const s = set();
+  const mine = S.bags.filter((b) => b.user_id === S.me.user_id);
+  const others = S.bags.filter((b) => b.user_id !== S.me.user_id);
+  const table = (rows, own) => `<div class="tablewrap"><table class="t">
+    <thead><tr><th>Item</th><th class="num">Paid</th>${[1, 2, 3, 4, 5].map((n) => `<th class="num">${ordinal(n)} post</th>`).join('')}<th class="num">Cheapest on AH now</th><th></th></tr></thead>
+    <tbody>${rows.map((b) => {
+      const m = info(b.item_id); const be = breakEven({ ...b, sell_price: m.sell_price }, s);
+      const next = Math.min(5, (b.posts || 0) + 1); const need = be[next - 1].each;
+      const floor = m.cur_min; const under = floor && floor < need;
+      return `<tr>
+        <td>${item(m, { sub: `${own ? '' : esc(member(b.user_id).display_name) + ' · '}bought ${sinceText(b.bought_at)}${b.posts ? ` · posted ${b.posts}× without selling` : ''}` })}</td>
+        <td class="num"><b>${num(b.quantity)}</b> × ${money(b.unit_price)}<div class="faint" style="font-size:13px">${money(b.unit_price * b.quantity)} total</div></td>
+        ${be.map((r) => `<td class="num" style="${r.post === next ? 'background:rgba(242,196,90,.28);font-weight:700' : 'opacity:.75'}">${money(r.each)}${r.post === next ? '<div style="font-size:12px">list at least this</div>' : ''}</td>`).join('')}
+        <td class="num">${floor ? money(floor) : '—'}${under ? '<div style="font-size:13px;color:var(--ember)">below your break-even</div>' : floor ? '<div class="faint" style="font-size:13px">you can sell above it</div>' : ''}</td>
+        <td style="white-space:nowrap">${own ? `<button class="btn small" data-act="bag-repost" data-bag="${b.id}" title="It came back unsold and you posted it again">Didn't sell, posted again</button><button class="btn small primary" data-act="bag-sold" data-bag="${b.id}">Sold</button>` : ''}</td></tr>`;
+    }).join('')}</tbody></table></div>`;
+  return `
+  <div class="row"><h2>My bags</h2><span class="spacer"></span><button class="btn primary" data-act="bag-new">+ I bought something</button></div>
+  <p class="lede">Write down what you paid, and Goldflow shows the lowest price you can list at without losing gold. Every 24-hour post that comes back unsold costs its deposit, so the price creeps up with each try. The highlighted column is your next post.</p>
+  ${mine.length ? table(mine, true) : '<div class="empty">Your bags are empty. When you buy something to resell, press <b>+ I bought something</b>.</div>'}
+  ${others.length ? `<h3 style="margin-top:22px">${esc(member(others[0].user_id).display_name)}'s bags</h3>${table(others, false)}` : ''}
+  <p class="kbd" style="margin-top:14px">Prices are per item and already cover the ${pct(s.ah_cut)} AH cut. Deposit per 24h post: 60% of the vendor price for the whole stack, at least 1s. Posting in several stacks? Add each stack on its own.</p>`;
+};
+function bagModal(pre = {}) {
+  const m = pre.item_id ? info(pre.item_id) : null;
+  const itemInput = m ? `<input type="hidden" name="item" value="${esc(itemName(m))}"><div style="margin-bottom:12px">${item(m)}</div>` : pickerField('What did you buy?', 'item', '');
+  openModal(`<header><h2 style="flex:1">I bought something</h2></header>${itemInput}
+    <div class="grid">
+      ${field('How many', 'quantity', pre.quantity ?? '', 'type="number" min="1" step="1" required')}
+      ${moneyField('Price paid each', 'unit_price', pre.unit_price)}
+    </div><div class="formerr" role="alert"></div>
+    <footer>${cancelBtn}<button class="btn primary" value="ok">Put in my bags</button></footer>`,
+  async (fd) => {
+    const it = m || (await resolvePicked(fd.get('item')));
+    if (!it.item_id) throw new Error('Pick the item from the list as you type.');
+    const q = Math.round(Number(fd.get('quantity'))); if (!(q > 0)) throw new Error('Enter how many.');
+    const price = needMoney(fd.get('unit_price'), 'the price');
+    await S.api.bagAdd({ user_id: S.me.user_id, item_id: it.item_id, item_name: itemName(it), quantity: q, unit_price: price, posts: 0 });
+    if (pre.claim) await S.api.setClaim(pre.claim, 'bought');
+    toast('In your bags'); await reload('bags', 'claims');
+  });
 }
 
 // ---------- Watchlist
@@ -749,7 +796,15 @@ document.addEventListener('click', async (e) => {
     switch (act) {
       case 'item': e.preventDefault(); if (dlg().open) dlg().close(); await itemModal(id); break;
       case 'claim': claimModal(id, deal(id, el.dataset.kind)?.plan); break;
-      case 'bought': { const d = deal(id, el.dataset.kind); const c = claimFor(id); txModal('buy', { item_id: id, quantity: c?.quantity ?? d?.plan.qty, unit_price: d?.plan.avgPrice ?? c?.max_price, claim: el.dataset.claim || null }); break; }
+      case 'bought': { const d = deal(id, el.dataset.kind); const c = claimFor(id); bagModal({ item_id: id, quantity: c?.quantity ?? d?.plan.qty, unit_price: d?.plan.avgPrice ?? c?.max_price, claim: el.dataset.claim || null }); break; }
+      case 'copy': {
+        const t = el.dataset.name;
+        try { await navigator.clipboard.writeText(t); } catch { const a = document.createElement('textarea'); a.value = t; document.body.append(a); a.select(); document.execCommand('copy'); a.remove(); }
+        el.textContent = 'Copied'; setTimeout(() => { el.textContent = 'Copy'; }, 1500); break;
+      }
+      case 'bag-new': bagModal(); break;
+      case 'bag-repost': { const b = S.bags.find((x) => x.id === el.dataset.bag); if (b) { await S.api.bagSet(b.id, { posts: (b.posts || 0) + 1 }); toast('Noted, next post price updated'); await reload('bags'); } break; }
+      case 'bag-sold': { const b = S.bags.find((x) => x.id === el.dataset.bag); if (b) { await S.api.bagRemove(b.id); toast(`Sold, ${itemName(info(b.item_id))} is out of your bags`); await reload('bags'); } break; }
       case 'release': await S.api.setClaim(el.dataset.claim, 'released'); toast('Claim released'); await reload('claims'); break;
       case 'watch': {
         if (S.watch.some((w) => w.item_id === id)) { await itemModal(id); break; }
@@ -813,23 +868,24 @@ function route() { const h = location.hash.slice(1); S.route = ROUTES.some(([k])
 // ---------------------------------------------------------------- loading
 async function loadAll() {
   S.settings = await S.api.settings();
-  const [members, status, deals, claims, watch, tx, recipes] = await Promise.all([
-    S.api.members(), S.api.status(), S.api.deals(), S.api.claims(), S.api.watchlist(), S.api.transactions(), S.api.recipes(),
+  const [members, status, deals, claims, watch, tx, recipes, bags] = await Promise.all([
+    S.api.members(), S.api.status(), S.api.deals(), S.api.claims(), S.api.watchlist(), S.api.transactions(), S.api.recipes(), S.api.bags(),
   ]);
-  Object.assign(S, { members, status, deals, claims, watch, tx, recipes });
+  Object.assign(S, { members, status, deals, claims, watch, tx, recipes, bags });
   S.market.clear();
   await ensureMarket([
-    ...deals.map((d) => d.item_id), ...claims.map((c) => c.item_id), ...watch.map((w) => w.item_id), ...tx.map((t) => t.item_id),
+    ...deals.map((d) => d.item_id), ...claims.map((c) => c.item_id), ...watch.map((w) => w.item_id), ...tx.map((t) => t.item_id), ...bags.map((b) => b.item_id),
     ...recipes.flatMap((r) => [r.product_item_id, ...r.reagents.map((g) => g.item_id)]),
   ].filter(Boolean));
 }
 async function reload(...what) {
   if (what.includes('claims')) S.claims = await S.api.claims();
   if (what.includes('watch')) S.watch = await S.api.watchlist();
+  if (what.includes('bags')) S.bags = await S.api.bags();
   if (what.includes('transactions')) S.tx = await S.api.transactions();
   if (what.includes('recipes')) S.recipes = await S.api.recipes();
   if (what.includes('deals')) S.deals = await S.api.deals();
-  await ensureMarket([...S.tx.map((t) => t.item_id), ...S.watch.map((w) => w.item_id), ...S.deals.map((d) => d.item_id), ...S.recipes.flatMap((r) => [r.product_item_id, ...r.reagents.map((g) => g.item_id)])].filter(Boolean));
+  await ensureMarket([...S.tx.map((t) => t.item_id), ...S.watch.map((w) => w.item_id), ...S.bags.map((b) => b.item_id), ...S.deals.map((d) => d.item_id), ...S.recipes.flatMap((r) => [r.product_item_id, ...r.reagents.map((g) => g.item_id)])].filter(Boolean));
   render();
 }
 
