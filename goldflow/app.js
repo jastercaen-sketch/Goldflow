@@ -146,11 +146,28 @@ function historyMeter(hours, { label = 'Price history', compact = false } = {}) 
     <span class="meter-text"><strong>${amount}</strong> of 7 days, ${note}</span></div>`;
 }
 
+// The scanner runs at :35 every hour and is done about a minute later.
+const UPDATE_MIN = 38;
+function updateTimes(now = Date.now()) {
+  const d = new Date(now); d.setUTCMinutes(UPDATE_MIN, 0, 0);
+  let last = d.getTime(); if (last > now) last -= 36e5;
+  return { last, next: last + 36e5 };
+}
+function nextUpdateText() {
+  const st = S.status; if (!st || S.api.demo) return '';
+  const now = Date.now(); const { last, next } = updateTimes(now);
+  const clock = (ms) => new Date(ms).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  const fresh = new Date(st.ts).getTime() >= last - 15 * 6e4; // this hour's scan reads the :25 data
+  if (!fresh && (S.statusAt || 0) < last) return '<b class="ready">New prices are ready. Press F5 to load them.</b>';
+  if (!fresh) return `This hour's scan is running late. Press F5 in a few minutes, or wait for the next one at ${clock(next)}.`;
+  return `Next update at <b>${clock(next)}</b> (in ${Math.max(1, Math.round((next - now) / 6e4))} min).`;
+}
+setInterval(() => { const el = document.getElementById('nextupd'); if (el) el.innerHTML = nextUpdateText(); }, 20000);
 function statusLine() {
   const st = S.status;
   if (!st) return `<div class="status"><span class="live stale"></span>No auction house scan yet.</div>`;
   const stale = Date.now() - new Date(st.ts) > 3 * 36e5;
-  return `<div class="status"><span class="live ${stale ? 'stale' : ''}"></span>Last auction house scan ${ago(st.ts)} — ${num(st.auctions)} listings, ${num(st.items)} different items.${stale ? ' The scanner may have stopped; check GitHub Actions.' : ''}</div>
+  return `<div class="status"><span class="live ${stale ? 'stale' : ''}"></span>Last auction house scan ${ago(st.ts)} — ${num(st.auctions)} listings, ${num(st.items)} different items.${stale ? ' The scanner may have stopped; check GitHub Actions.' : ''} <span id="nextupd">${nextUpdateText()}</span></div>
   ${st.historyHours != null ? historyMeter(st.historyHours) : ''}`;
 }
 
@@ -871,7 +888,7 @@ async function loadAll() {
   const [members, status, deals, claims, watch, tx, recipes, bags] = await Promise.all([
     S.api.members(), S.api.status(), S.api.deals(), S.api.claims(), S.api.watchlist(), S.api.transactions(), S.api.recipes(), S.api.bags(),
   ]);
-  Object.assign(S, { members, status, deals, claims, watch, tx, recipes, bags });
+  Object.assign(S, { members, status, deals, claims, watch, tx, recipes, bags, statusAt: Date.now() });
   S.market.clear();
   await ensureMarket([
     ...deals.map((d) => d.item_id), ...claims.map((c) => c.item_id), ...watch.map((w) => w.item_id), ...tx.map((t) => t.item_id), ...bags.map((b) => b.item_id),
@@ -884,7 +901,7 @@ async function reload(...what) {
   if (what.includes('bags')) S.bags = await S.api.bags();
   if (what.includes('transactions')) S.tx = await S.api.transactions();
   if (what.includes('recipes')) S.recipes = await S.api.recipes();
-  if (what.includes('deals')) S.deals = await S.api.deals();
+  if (what.includes('deals')) { S.deals = await S.api.deals(); S.status = await S.api.status(); S.statusAt = Date.now(); }
   await ensureMarket([...S.tx.map((t) => t.item_id), ...S.watch.map((w) => w.item_id), ...S.bags.map((b) => b.item_id), ...S.deals.map((d) => d.item_id), ...S.recipes.flatMap((r) => [r.product_item_id, ...r.reagents.map((g) => g.item_id)])].filter(Boolean));
   render();
 }
